@@ -1,7 +1,7 @@
-(defproject clauth "1.0.0-rc17"
-  :description "OAuth2 based authentication library for Ring"
+(defproject nicheware/clauth "1.0.1-SNAPSHOT"
+  :description "OAuth2 based authentication library for Ring (forked from http://pelle.github.com/clauth)"
   :url "http://github.com/pelle/clauth"
-  :dependencies [[org.clojure/clojure "1.5.1"]
+  :dependencies [[org.clojure/clojure "1.8.0"]
                  [crypto-random "1.1.0"]
                  [commons-codec "1.6"]
                  [ring/ring-core "1.2.0"]
@@ -16,4 +16,3 @@
                      [com.taoensso/carmine "2.2.0"]
                      [hiccup-bootstrap "0.1.0"]]}}
   :clean-non-project-classes true )
-

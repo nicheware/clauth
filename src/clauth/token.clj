@@ -87,6 +87,8 @@
      (store-token (oauth-token token))))
 
 (defn find-valid-token
+
+
   "return a token from the store if it is valid."
   [t]
   (if-let [token (fetch-token t)]
