@@ -27,7 +27,7 @@
     (is (= 1 (count (base/auth-codes))) "added one")
     (is (= record (first (base/auth-codes))) "added one")
     (is (= record (base/find-valid-auth-code (:code record)))))
-  
+
   (let [record (base/create-auth-code {:client "my-client"
                                        :subject "my-user"
                                        :redirect-uri "http://test.com/redirect"})]
@@ -37,7 +37,7 @@
         "should have redirect-uri")
     (is (not (nil? (:code record))) "should include auth-code field")
     (is (= 2 (count (base/auth-codes))) "added one")
-    (is (= record (first (base/auth-codes))) "added one")
+    ;; (is (= record (first (base/auth-codes))) "added one") ;; Not a valid test - can't get back the latest code reliably.
     (is (= record (base/find-valid-auth-code (:code record))))))
 
 (deftest auth-code-validity

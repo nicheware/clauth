@@ -6,7 +6,9 @@
              [user :as user]
              [token :refer :all]
              [auth-code :refer :all]]
-            [hiccup.util :refer :all])
+            [hiccup.util :refer :all]
+            [cemerick.url :as url-util]
+            [clojure.string :as str])
   (:import [org.apache.commons.codec.binary Base64]))
 
 (deftest token-decoration
@@ -43,6 +45,9 @@
                :body (str "{\"access_token\":\"" (:token (first (tokens)))
                           "\",\"token_type\":\"bearer\"}")}
              response) "url form encoded client credentials"))
+
+    ;; Need to reset as we cant rely on (first (tokens)) to get the most recent token
+    (reset-token-store!)
 
     (is (= (handler {:params { :grant_type "client_credentials" }
                      :headers {"authorization"
@@ -90,6 +95,9 @@
             :body (str "{\"access_token\":\"" (:token (first (tokens)))
                        "\",\"token_type\":\"bearer\"}")})
         "url form encoded client credentials")
+
+    ;; Need to reset as we cant rely on (first (tokens)) to get the most recent token
+    (reset-token-store!)
 
     (is (= (handler {:params {:grant_type "password"
                               :username "john@example.com"
@@ -166,6 +174,9 @@
                          "\",\"token_type\":\"bearer\"}")}
              response)
           "url form encoded client credentials"))
+
+    ;; Need to reset as we cant rely on (first (tokens)) to get the most recent token
+    (reset-token-store!)
 
     (let [code (create-auth-code client user redirect_uri "calendar" object)]
       (is (= (handler {:params {:grant_type "authorization_code"
@@ -260,6 +271,29 @@
               :body "{\"error\":\"invalid_client\"}"})
           "should fail with missing client authentication"))))
 
+(defn compare-url
+  "Compare two urls, but does not care about the ordering of query string arguments
+  Will replace test.com# with test.com? for testing purposes"
+  [test-url expected-url]
+  ;; The url class doesnt handles "#" instead if "?" as domain separator, so test explicitly
+  (if (re-find #"#" expected-url)  ;; Can also use (str/includes? st "#") in 1.8.0
+    (if (re-find #"#" test-url)
+      (compare-url (str/replace test-url #"#" "?") (str/replace expected-url #"#" "?"))
+      false)
+    ;; Compare the conanical version of the URL
+    (= (str  (url-util/url test-url))
+       (str  (url-util/url expected-url)))))
+
+(defn compare-location
+  "Utility function that does a safe comparison of a location header.
+   Ensure that equality of the url is tested for not just a string comparison, as the order of query strings
+   should not be relevant. This is because they are produced from key maps and the order of keys being
+   extract from a map can change. eg Changed from Clojure 1.5.1 to 1.6.0"
+  [location-map expected-url]
+  (if-let [location-url (location-map "Location")]
+    (compare-url location-url expected-url)
+    false))
+
 (deftest requesting-authorization-code
   (reset-token-store!)
   (reset-auth-code-store!)
@@ -308,8 +342,7 @@
           code_string (last (re-find #"code=([^&]+)" post_auth_redirect_uri))
           auth-code (fetch-auth-code code_string)]
       (is (= (response :status) 302))
-      (is (= post_auth_redirect_uri
-             (str "http://test.com?state=abcde&code=" code_string))
+      (is (compare-url post_auth_redirect_uri (str "http://test.com?state=abcde&code=" code_string))
           "should redirect with proper format")
       (is (= (:client auth-code) client) "should properly set client")
       (is (= (:subject auth-code) user) "should properly set subject")
@@ -324,8 +357,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location" "http://test.com?state=abcde&error=invalid_request"})))
+      (is (compare-location (response :headers)
+                            "http://test.com?state=abcde&error=invalid_request")))
 
     (let [session_token (create-token client user)
           response (handler {:request-method :get
@@ -334,8 +367,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location" "http://test.com?state=abcde&error=invalid_request"})
+      (is (compare-location (response :headers)
+                             "http://test.com?state=abcde&error=invalid_request")
           "should redirect with error in query"))
 
     (let [session_token (create-token client user)
@@ -345,8 +378,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location" "http://test.com?error=invalid_request"})
+      (is (compare-location (response :headers)
+                             "http://test.com?error=invalid_request")
           "should redirect with error in query"))
 
     (let [session_token (create-token client user)
@@ -356,9 +389,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location"
-              "http://test.com?state=abcde&error=unsupported_response_type"})
+      (is (compare-location (response :headers)
+                            "http://test.com?state=abcde&error=unsupported_response_type")
           "should return error on unsupported response type"))
 
       (let [session_token (create-token client user)
@@ -369,9 +401,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location"
-              "http://test.com#state=abcde&error=unsupported_response_type"})
+      (is (compare-location (response :headers)
+                            "http://test.com#state=abcde&error=unsupported_response_type")
           "should return error on unsupported response type"))
 
     (let [session_token (create-token client user)
@@ -386,13 +417,14 @@
           code_string (last (re-find #"code=([^&]+)" post_auth_redirect_uri))
           auth-code (fetch-auth-code code_string)]
       (is (= (response :status) 302))
-      (is (= post_auth_redirect_uri
-             (str "http://test.com?state=abcde&code=" code_string))
+      (is (compare-url post_auth_redirect_uri
+                       (str "http://test.com?state=abcde&code=" code_string))
           "should redirect with proper format")
       (is (= (:client auth-code) client) "should properly set client")
       (is (= (:subject auth-code) user) "should properly set subject")
       (is (= (:redirect-uri auth-code) redirect_uri)
           "should properly save redirect_uri"))))
+
 
 (deftest requesting-implicit-authorization
   (reset-token-store!)
@@ -437,8 +469,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location" "http://test.com?state=abcde&error=invalid_request"})))
+      (is (compare-location (response :headers)
+                            "http://test.com?state=abcde&error=invalid_request")))
 
     (let [session_token (create-token client user)
           response (handler {:request-method :get
@@ -447,8 +479,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location" "http://test.com#state=abcde&error=invalid_request"})
+      (is (compare-location (response :headers)
+                             "http://test.com#state=abcde&error=invalid_request")
           "should redirect with error in fragment"))
 
     (let [session_token (create-token client user)
@@ -458,8 +490,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location" "http://test.com#error=invalid_request"})
+      (is (compare-location (response :headers)
+                            "http://test.com#error=invalid_request")
           "should redirect with error in fragment"))
 
     (let [session_token (create-token client user)
@@ -469,9 +501,8 @@
                              :query-string query-string
                              :session {:access_token (:token session_token)}})]
       (is (= (response :status) 302))
-      (is (= (response :headers)
-             {"Location"
-              "http://test.com?state=abcde&error=unsupported_response_type"})
+      (is (compare-location (response :headers)
+                            "http://test.com?state=abcde&error=unsupported_response_type")
           "should return error on unsupported response type"))
 
     (let [session_token (create-token client user)
@@ -486,8 +517,8 @@
           token_string (last (re-find #"access_token=([^&]+)" redirect_uri))
           token (fetch-token token_string)]
       (is (= (response :status) 302))
-      (is (= redirect_uri (str "http://test.com#state=abcde&access_token="
-                               token_string "&token_type=bearer"))
+      (is (compare-url redirect_uri
+             (str "http://test.com#state=abcde&access_token=" token_string "&token_type=bearer"))
           "should redirect with proper format")
       (is (= (:client token) client) "should properly set client")
       (is (= (:subject token) user) "should properly set subject"))))
@@ -568,4 +599,3 @@
         req {:access-token session-token}]
     (is (base/logged-in? req) "should be marked as logged in")
     (is (= (base/current-user req) user) "should have a current user")))
-

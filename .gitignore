@@ -8,5 +8,5 @@
 /.lein-deps-sum
 *.swp
 /target
-
+.nrepl-port
 .lein-repl-history
