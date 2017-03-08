@@ -114,15 +114,18 @@
         (error-response "invalid_grant")))))
 
  (defmethod token-request-handler "password"
-   [req {:keys [client-authenticator token-creator user-authenticator]}]
+   [req {:keys [client-authenticator token-creator user-authenticator multi-app-user-authenticator]}]
    (client-authenticated-request
     req
     client-authenticator
-    (fn [req client] (if-let [user (user-authenticator
-                                    ((req :params) :username)
-                                    ((req :params) :password))]
-                       (respond-with-new-token token-creator client user)
-                       (error-response "invalid_grant")))))
+    (fn [req client]
+      (let [username ((req :params) :username)
+            password ((req :params) :password)]
+        (if-let [user (if multi-app-user-authenticator
+                        (multi-app-user-authenticator username password client)
+                        (user-authenticator username password))]
+          (respond-with-new-token token-creator client user)
+          (error-response "invalid_grant"))))))
 
  (defmethod token-request-handler :default [req _]
    (error-response "unsupported_grant_type"))
@@ -137,6 +140,9 @@
      correct client_id and client secret combo
     :user-authenticator a function that returns a user when passwed a correct
      username and password combo
+    :multi-app-user-authenticator a function that returns a user when passwed a correct
+     client, username and password combo
+     (allows for support of multiple application where username unique within application)
     :auth-code-lookup  a function which returns a auth code record when passed
      it's code string
     :token-creator a function that creates a new token when passed a client and
